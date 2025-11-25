@@ -1,26 +1,31 @@
-from preprocess import preprocess_data
-from model_lstm import build_lstm
-from model_tcn import build_tcn
+import optuna
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.metrics import mean_squared_error
 import numpy as np
-from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-def train_model(model_type="lstm"):
-    X_train, y_train, X_test, y_test, _ = preprocess_data()
+def create_lstm_model(trial, input_shape):
+    model = Sequential()
+    units = trial.suggest_int("units", 32, 128)
+    dropout = trial.suggest_float("dropout", 0.1, 0.4)
 
-    input_shape = (X_train.shape[1], X_train.shape[2])
-
-    model = build_lstm(input_shape) if model_type == "lstm" else build_tcn(input_shape)
-
-    model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split=0.1)
-
-    preds = model.predict(X_test)
-    rmse = np.sqrt(mean_squared_error(y_test, preds))
-    mae = mean_absolute_error(y_test, preds)
-
-    print(f"Model: {model_type.upper()} RMSE = {rmse:.4f}, MAE = {mae:.4f}")
-
+    model.add(LSTM(units, return_sequences=False, input_shape=input_shape))
+    model.add(Dropout(dropout))
+    model.add(Dense(1))
+    model.compile(optimizer="adam", loss="mse")
     return model
 
-if __name__ == "__main__":
-    train_model("lstm")
-    train_model("tcn")
+def objective(trial):
+    global X_train, X_val, y_train, y_val
+    model = create_lstm_model(trial, (X_train.shape[1], X_train.shape[2]))
+    model.fit(X_train, y_train, epochs=8, batch_size=32, verbose=0)
+    pred = model.predict(X_val)
+    return mean_squared_error(y_val, pred)
+
+study = optuna.create_study(direction="minimize")
+study.optimize(objective, n_trials=20)
+
+print("Best Params:", study.best_params)
+
+with open("hyperparam_results.txt", "w") as f:
+    f.write(str(study.best_params))
